@@ -78,11 +78,15 @@ app.get("/", (req, res) => {
 app.get("/pay", async (req, res) => {
   try {
     const amount = parseFloat(req.query.amount as string);
+    let userId:any = req.query.user || "SYSTEM";
+    let mobileNumber = req.query.mobile;
     if (isNaN(amount) || amount <= 0) {
       return res.status(400).send("Invalid amount");
     }
+    if (!mobileNumber) {
+      return res.status(400).send("Invalid mobile");
+    }
 
-    let userId:any = req.query.user || "SYSTEM";
     let merchantTransactionId = uniqid();
 
     let normalPayLoad = {
@@ -90,9 +94,9 @@ app.get("/pay", async (req, res) => {
       merchantTransactionId: merchantTransactionId,
       merchantUserId: userId,
       amount: amount * 100,
-      redirectUrl: `${APP_BE_URL}?txn_id=${merchantTransactionId}`,
+      redirectUrl: `${APP_BE_URL}/payment/validate/${merchantTransactionId}`,
       redirectMode: "REDIRECT",
-      mobileNumber: "9999999999",
+      mobileNumber: mobileNumber,
       paymentInstrument: { type: "PAY_PAGE" },
     };
 
