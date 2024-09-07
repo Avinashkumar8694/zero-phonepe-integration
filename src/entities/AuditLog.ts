@@ -15,7 +15,9 @@ export class AuditLog extends BaseEntity {
   timestamp: Date;
 
   @Column({ type: 'simple-json', nullable: true }) // JSON object type for metadata
-  metadata: object;
+  request: object;
+  @Column({ type: 'simple-json', nullable: true }) // JSON object type for metadata
+  response: object;
 
   constructor() {
     super();

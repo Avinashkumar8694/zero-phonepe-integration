@@ -60,11 +60,12 @@ async function makeRequestWithRetry(url: string, options: any, retries = 3, dela
 }
 
 // Log audit actions
-async function logAudit(action: string, details: string,metadata: Object) {
+async function logAudit(action: string, details: string,request: Object, response: Object) {
   const auditLog = new AuditLog();
   auditLog.action = action;
   auditLog.details = details;
-  auditLog.metadata = metadata;
+  auditLog.request = request;
+  auditLog.response = response;
 
   await auditLogDataSource.getRepository(AuditLog).save(auditLog);
 }
@@ -120,7 +121,7 @@ app.get("/pay", async (req, res) => {
         amount,
         status: 'INITIATED',
       });
-      logAudit('Payment Initiated', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`, response.data?.data);
+      logAudit('Payment Initiated', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`,normalPayLoad, response.data?.data);
       res.redirect(response.data.data.instrumentResponse.redirectInfo.url);
     } else {
       res.status(500).send("Error initiating payment");
@@ -144,7 +145,10 @@ app.get("/payment/validate/:merchantTransactionId", async (req, res) => {
     let string = `/pg/v1/status/${MERCHANT_ID}/${merchantTransactionId}` + SALT_KEY;
     let sha256_val = sha256(string);
     let xVerifyChecksum = sha256_val + "###" + SALT_INDEX;
-
+    const payload = {
+      MERCHANT_ID,
+      merchantTransactionId
+    }
     const response = await makeRequestWithRetry(
       statusUrl,
       {
@@ -161,11 +165,11 @@ app.get("/payment/validate/:merchantTransactionId", async (req, res) => {
     if (response.data) {
       if (response.data.code === "PAYMENT_SUCCESS") {
         await mainDataSource.getRepository(Transaction).update({ merchantTransactionId }, { status: 'SUCCESS' });
-        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: SUCCESS`, response.data);
+        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: SUCCESS`,payload, response.data);
         res.send(response.data);
       } else {
         await mainDataSource.getRepository(Transaction).update({ merchantTransactionId }, { status: 'FAILED' });
-        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: FAILED`, response.data);
+        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: FAILED`,payload, response.data);
         res.status(400).send("Payment failed or pending");
       }
     } else {
@@ -201,18 +205,18 @@ app.post("/refund", async (req, res) => {
     let string = base64EncodedPayload + "/pg/v1/refund" + SALT_KEY;
     let sha256_val = sha256(string);
     let xVerifyChecksum = sha256_val + "###" + SALT_INDEX;
-
+    const payload = {
+      method: 'POST',
+      data: { request: base64EncodedPayload },
+      headers: {
+        "Content-Type": "application/json",
+        "X-VERIFY": xVerifyChecksum,
+        accept: "application/json",
+      }
+    }
     const response = await makeRequestWithRetry(
       `${PHONE_PE_HOST_URL}/pg/v1/refund`,
-      {
-        method: 'POST',
-        data: { request: base64EncodedPayload },
-        headers: {
-          "Content-Type": "application/json",
-          "X-VERIFY": xVerifyChecksum,
-          accept: "application/json",
-        }
-      }
+      payload
     );
 
     if (response.data) {
@@ -221,7 +225,7 @@ app.post("/refund", async (req, res) => {
         amount,
         status: 'REQUESTED',
       });
-      logAudit('Refund Requested', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`, response.data);
+      logAudit('Refund Requested', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`,refundPayload,  response.data);
       res.send(response.data);
     } else {
       res.status(500).send("Error initiating refund");
@@ -250,7 +254,9 @@ app.get("/refund/status/:refundId", async (req, res) => {
     let string = `/pg/v1/refund/${MERCHANT_ID}/${refundId}` + SALT_KEY;
     let sha256_val = sha256(string);
     let xVerifyChecksum = sha256_val + "###" + SALT_INDEX;
-
+    const payload = {
+      refundId
+    }
     const response = await makeRequestWithRetry(
       statusUrl,
       {
@@ -266,7 +272,7 @@ app.get("/refund/status/:refundId", async (req, res) => {
 
     if (response.data) {
       await mainDataSource.getRepository(Refund).update({ id: parseInt(refundId) }, { status: response.data.status });
-      logAudit('Refund Status Updated', `Refund ID: ${refundId}, Status: ${response.data.status}`,response.data);
+      logAudit('Refund Status Updated', `Refund ID: ${refundId}, Status: ${response.data.status}`,payload, response.data);
       res.send(response.data);
     } else {
       res.status(500).send("Error fetching refund status");
