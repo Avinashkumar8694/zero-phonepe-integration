@@ -32,7 +32,7 @@ const PHONE_PE_HOST_URL = process.env.PHONE_PE_HOST_URL || "https://api-preprod.
 const SALT_INDEX = Number(process.env.SALT_INDEX) || 1;
 const SALT_KEY = process.env.SALT_KEY || "96434309-7796-489d-8924-ab56988a6076";
 const APP_BE_URL = process.env.APP_BE_URL || "http://localhost:3000";
-
+const APP_PAYMENT_SERVER_URL = process.env.APP_PAYMENT_SERVER_URL || "http://localhost:3000";
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -80,6 +80,7 @@ app.get("/pay", async (req, res) => {
     const amount = parseFloat(req.query.amount as string);
     let userId:any = req.query.user || "SYSTEM";
     let mobileNumber = req.query.mobile;
+    let redirectURL = req.query.redirectURL;
     if (isNaN(amount) || amount <= 0) {
       return res.status(400).send("Invalid amount");
     }
@@ -94,10 +95,11 @@ app.get("/pay", async (req, res) => {
       merchantTransactionId: merchantTransactionId,
       merchantUserId: userId,
       amount: amount * 100,
-      redirectUrl: `${APP_BE_URL}/payment/validate/${merchantTransactionId}`,
+      callbackUrl: `${APP_PAYMENT_SERVER_URL}/payment/validate/${merchantTransactionId}`,
       redirectMode: "REDIRECT",
       mobileNumber: mobileNumber,
       paymentInstrument: { type: "PAY_PAGE" },
+      redirectUrl: `${redirectURL}`
     };
 
     let base64EncodedPayload = Buffer.from(JSON.stringify(normalPayLoad), "utf8").toString("base64");
@@ -186,7 +188,7 @@ app.get("/payment/validate/:merchantTransactionId", async (req, res) => {
 });
 
 app.post("/refund", async (req, res) => {
-  const { merchantTransactionId, amount } = req.body;
+  const { merchantTransactionId, amount, user } = req.body;
 
   if (!merchantTransactionId || !amount) {
     return res.status(400).send("Missing transaction ID or amount");
@@ -201,8 +203,10 @@ app.post("/refund", async (req, res) => {
     let refundPayload = {
       merchantId: MERCHANT_ID,
       merchantTransactionId: transaction.merchantTransactionId,
-      amount: amount * 100,
+      amount: amount,
+      merchantUserId: user,
       reason: "Refund request",
+      callbackUrl: `${APP_PAYMENT_SERVER_URL}/refund/status/${transaction.merchantTransactionId}`
     };
 
     let base64EncodedPayload = Buffer.from(JSON.stringify(refundPayload), "utf8").toString("base64");
