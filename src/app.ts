@@ -5,11 +5,12 @@ import rateLimit from 'express-rate-limit';
 import axios from 'axios';
 import sha256 from 'sha256';
 import uniqid from 'uniqid';
+import * as dotenv from 'dotenv';
+dotenv.config();
 import { mainDataSource, auditLogDataSource } from './config/database.config';
 import { Transaction } from './entities/Transaction';
 import { Refund } from './entities/Refund';
 import { AuditLog } from './entities/AuditLog';
-
 // Initialize data sources
 mainDataSource.initialize().then(() => {
   console.log('Main database connected');
@@ -40,7 +41,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.',
 });
 app.use(limiter);
@@ -59,11 +60,12 @@ async function makeRequestWithRetry(url: string, options: any, retries = 3, dela
 }
 
 // Log audit actions
-async function logAudit(action: string, details: string) {
+async function logAudit(action: string, details: string,metadata: Object) {
   const auditLog = new AuditLog();
   auditLog.action = action;
   auditLog.details = details;
-  
+  auditLog.metadata = metadata;
+
   await auditLogDataSource.getRepository(AuditLog).save(auditLog);
 }
 
@@ -79,7 +81,7 @@ app.get("/pay", async (req, res) => {
       return res.status(400).send("Invalid amount");
     }
 
-    let userId = "MUID123";
+    let userId:any = req.query.user || "SYSTEM";
     let merchantTransactionId = uniqid();
 
     let normalPayLoad = {
@@ -98,8 +100,7 @@ app.get("/pay", async (req, res) => {
     let sha256_val = sha256(string);
     let xVerifyChecksum = sha256_val + "###" + SALT_INDEX;
 
-    const response = await makeRequestWithRetry(
-      `${PHONE_PE_HOST_URL}/pg/v1/pay`,
+    const response = await axios(`${PHONE_PE_HOST_URL}/pg/v1/pay`,
       {
         method: 'POST',
         data: { request: base64EncodedPayload },
@@ -112,14 +113,14 @@ app.get("/pay", async (req, res) => {
     );
 
     if (response.data?.data?.instrumentResponse) {
-      const { merchantTransactionId } = response.data.data.instrumentResponse;
+      // const { merchantTransactionId } = response.data.data.instrumentResponse;
       await mainDataSource.getRepository(Transaction).insert({
         merchantTransactionId,
         userId,
         amount,
         status: 'INITIATED',
       });
-      logAudit('Payment Initiated', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`);
+      logAudit('Payment Initiated', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`, response.data?.data);
       res.redirect(response.data.data.instrumentResponse.redirectInfo.url);
     } else {
       res.status(500).send("Error initiating payment");
@@ -160,11 +161,11 @@ app.get("/payment/validate/:merchantTransactionId", async (req, res) => {
     if (response.data) {
       if (response.data.code === "PAYMENT_SUCCESS") {
         await mainDataSource.getRepository(Transaction).update({ merchantTransactionId }, { status: 'SUCCESS' });
-        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: SUCCESS`);
+        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: SUCCESS`, response.data);
         res.send(response.data);
       } else {
         await mainDataSource.getRepository(Transaction).update({ merchantTransactionId }, { status: 'FAILED' });
-        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: FAILED`);
+        logAudit('Payment Status Updated', `Transaction ID: ${merchantTransactionId}, Status: FAILED`, response.data);
         res.status(400).send("Payment failed or pending");
       }
     } else {
@@ -220,7 +221,7 @@ app.post("/refund", async (req, res) => {
         amount,
         status: 'REQUESTED',
       });
-      logAudit('Refund Requested', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`);
+      logAudit('Refund Requested', `Transaction ID: ${merchantTransactionId}, Amount: ${amount}`, response.data);
       res.send(response.data);
     } else {
       res.status(500).send("Error initiating refund");
@@ -265,7 +266,7 @@ app.get("/refund/status/:refundId", async (req, res) => {
 
     if (response.data) {
       await mainDataSource.getRepository(Refund).update({ id: parseInt(refundId) }, { status: response.data.status });
-      logAudit('Refund Status Updated', `Refund ID: ${refundId}, Status: ${response.data.status}`);
+      logAudit('Refund Status Updated', `Refund ID: ${refundId}, Status: ${response.data.status}`,response.data);
       res.send(response.data);
     } else {
       res.status(500).send("Error fetching refund status");

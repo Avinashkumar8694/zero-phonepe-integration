@@ -14,6 +14,9 @@ export class AuditLog extends BaseEntity {
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   timestamp: Date;
 
+  @Column({ type: 'simple-json', nullable: true }) // JSON object type for metadata
+  metadata: object;
+
   constructor() {
     super();
     this.id = 0;

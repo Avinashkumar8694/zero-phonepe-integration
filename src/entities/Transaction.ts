@@ -23,11 +23,5 @@ export class Transaction extends BaseEntity {
 
   constructor() {
     super();
-    this.id = 0;
-    this.merchantTransactionId = '';
-    this.userId = '';
-    this.amount = 0;
-    this.status = 'INITIATED';
-    this.createdAt = new Date();
   }
 }
